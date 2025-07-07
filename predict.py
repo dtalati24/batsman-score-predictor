@@ -56,6 +56,8 @@ class FeatureEngineer:
         self.player_name = player_name
         self.run_target = run_target
     
+
+
     def create_features(self, df_bowler, df_pos, df_oppo, df_venue, df_innings):
         """
         Creates features for predictive modeling, merging different datasets and calculating statistics.
@@ -270,6 +272,45 @@ class Predictor:
         print(f"Correct Below {self.run_target} Predictions: {correct_below_preds}")
         print(f"Accuracy: {(correct_preds/total_preds):.2f}")
 
+    def predict_new_match(self, input_dict, model):
+        """
+        Predict runs or classification result for a new match.
+
+        Args:
+            input_dict (dict): feature values for the new match (e.g., avg_vs_bowlers, opposition, venue, etc.)
+            model: a trained sklearn-like model with .predict() or .predict_proba()
+
+        Returns:
+            prediction: model prediction (class or regression output)
+        """
+        # Specify categorical columns you encoded during training
+        cat_cols = ["opposition", "venue", "innings_num"]
+
+        # Create dataframe for the input dict
+        df = pd.DataFrame([input_dict])
+        df[cat_cols] = df[cat_cols].fillna('missing').astype(str)
+
+        # One-hot encode categorical columns using your saved encoder
+        cat_data = self.encoder.transform(df[cat_cols])
+        cat_df = pd.DataFrame(cat_data, columns=self.encoder.get_feature_names_out(cat_cols))
+
+        # Numeric columns used in your model
+        num_cols = ["avg_vs_bowlers", "sr_vs_bowlers", "batting_pos", "all_time_avg", "avg_last_3"]
+        num_df = df[num_cols]
+
+        # Handle missing numeric data if needed
+        if pd.isna(num_df["avg_last_3"].iloc[0]):
+            num_df["avg_last_3"].fillna(0, inplace=True)
+
+        # Combine numeric and encoded categorical features
+        x_new = pd.concat([num_df.reset_index(drop=True), cat_df.reset_index(drop=True)], axis=1)
+        if hasattr(model, "predict_proba"):
+            pred_proba = model.predict_proba(x_new)
+            return pred_proba
+        else:
+            pred = model.predict(x_new)
+            return pred
+
 
 
 if __name__ == "__main__":
@@ -308,7 +349,7 @@ if __name__ == "__main__":
         "Logistic Regression": LogisticRegression(max_iter=10000, random_state=42),
         "Logistic Regression (L2)": LogisticRegression(max_iter=10000, penalty='l2', random_state=42)
     }
-
+      
     # Train and evaluate the best regression model for predicting runs
     print(f"\nSCORE PREDICTOR FOR {player_name.upper()}")
     best_reg_name= predictor.evaluate_models(x_train, y_train_reg, regressors, scoring="neg_root_mean_squared_error")
@@ -328,5 +369,32 @@ if __name__ == "__main__":
         clf.fit(x_train, y_train_clf)
         preds = clf.predict_proba(x_test)[:, 1]
         predictor.print_model_summary(preds, y_test_clf, clf_name)
+    
+    print("\nPREDICT NEW MATCH")
+
+    # Edit new_match_data to get a prediction - to be updated 
+
+    all_time_avg, avg_last_3 = df_features.iloc[-1][["all_time_avg", "avg_last_3"]]
+
+    new_match_data = {
+    "opposition": "Australia",
+    "venue": "Melbourne",
+    "innings_num": 1,
+    "avg_vs_bowlers": 30.6, # to be updated - automatically calculate this given list of opposition players
+    "sr_vs_bowlers": 85.2, # to be updated - automatically calculate this given list of opposition players
+    "batting_pos": 3,
+    "all_time_avg": all_time_avg,
+    "avg_last_3": avg_last_3
+    }
+
+    print(f"New Match\n{new_match_data}\n")
+
+    best_reg_model = regressors[best_reg_name].fit(x_train, y_train_reg)
+    xg_clf_model = classifiers["XGBoost"].fit(x_train, y_train_clf)
+    best_clf_model = classifiers[best_clf_name].fit(x_train, y_train_clf)
+                                                    
+    print(f"XGBoost Probability {player_name} scores above {run_target} Runs: {(predictor.predict_new_match(new_match_data, xg_clf_model))[0][0]*100:.2f}")
+    print(f"{best_clf_name} Probability {player_name} scores above {run_target} Runs: {(predictor.predict_new_match(new_match_data, best_clf_model))[0][0]*100:.2f}")
+    print(f"{best_reg_name} Predicted Runs for {player_name}: {(predictor.predict_new_match(new_match_data, best_reg_model))[0]:.2f}")
 
 
